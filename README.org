@@ -1,0 +1,12 @@
+* Purpose
+
+net-wait waits for network links or addresses to stabilize.  It can
+also issue router solicitation messages (ICMPv6 type 133, RFC 4861)
+when link comes up to speed up creation of SLAAC addresses (RFC 4862)
+
+The 'ip link' and 'ip addr' can bring links up and add addresses on
+them.  But it can take some time until they are usuable.
+
+E.g. 'ip link up' waits until the physical link is up which can take
+several seconds.  Or 'ip link add' puts IPv6 addresses into tentiative
+state.
