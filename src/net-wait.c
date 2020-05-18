@@ -233,18 +233,18 @@ static void create_tree(struct op_node **root, enum op_type type,
 		*root = &leafs[0];
 	} else {
 		*root = &ops[num_ops - 1];
-		ops[num_ops - 1] = (struct op_node) {
+		**root = (struct op_node) {
 			.type		= type,
 			.result		= OP_RESULT_UNDECIDED,
 		};
 
 		--num_ops;
 
-		create_tree(&ops[0].and_or.a, type,
+		create_tree(&(*root)->and_or.a, type,
 			    &leafs[0], (num_leafs + 1) / 2,
 			    &ops[0],   (num_ops + 1) / 2);
 
-		create_tree(&ops[0].and_or.b, type,
+		create_tree(&(*root)->and_or.b, type,
 			    &leafs[(num_leafs + 1) / 2], num_leafs / 2,
 			    &ops[(num_ops + 1) / 2],     num_ops / 2);
 	};
