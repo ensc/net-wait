@@ -135,7 +135,7 @@ struct run_environment {
 static void show_help(void)
 {
 	printf("Usage: net-wait COMMAND [ OPTIONS ] [ SELECTORS ]\n"
-	       "where: COMMAND := { help | link | address }\n"
+	       "where: COMMAND := { help | link | addr }\n"
 	       "       OPTIONS := { --all | --any  | --exec <prog> |\n"
 	       "                    --solicit | --only-ip4 | --only-ip6 }\n"
 	       "                    --timeout <ms> }\n"
