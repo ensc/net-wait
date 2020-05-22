@@ -10,3 +10,31 @@ them.  But it can take some time until they are usuable.
 E.g. 'ip link up' waits until the physical link is up which can take
 several seconds.  Or 'ip link add' puts IPv6 addresses into tentiative
 state.
+
+* Examples
+
+- wait until physical link on both =eth0= and =eth1= is up
+
+  #+BEGIN_SRC sh
+  net-wait link eth0 eth1
+  #+END_SRC
+
+- wait until physical link on either =eth0= or =eth1= (or both) is up
+
+  #+BEGIN_SRC sh
+  net-wait link --any eth0 eth1
+  #+END_SRC
+
+- wait until physical link on both =eth0= is up and send a router
+  solicitation message then
+
+  #+BEGIN_SRC sh
+  net-wait link --solicit eth0
+  #+END_SRC
+
+- wait until device has a stable (e.g. not tentiative) global IPv6
+  address; abort after 10s
+
+  #+BEGIN_SRC sh
+  net-wait addr --timeout 10000 eth0
+  #+END_SRC
