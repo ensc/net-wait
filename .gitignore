@@ -1,2 +1,5 @@
-net-wait
+/README.pdf
+/README.tex
+/auto
 compile_commands.json
+net-wait
