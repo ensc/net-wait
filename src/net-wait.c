@@ -156,7 +156,7 @@ static void xclose(int fd)
 static void run_solicit(struct run_environment *env, char const *if_name)
 {
 	static int const		ZERO = 0;
-	static int const		ONE = 1;
+	static int const		HOPS = 255;
 
 	struct ifreq			ifr = {};
 	int				fd;
@@ -205,7 +205,7 @@ static void run_solicit(struct run_environment *env, char const *if_name)
 		goto out;
 	}
 
-	setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &ONE,  sizeof ONE);
+	setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &HOPS, sizeof HOPS);
 	setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &ZERO, sizeof ZERO);
 	setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_IF,
 		   &if_idx, sizeof if_idx);
