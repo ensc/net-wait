@@ -184,7 +184,7 @@ static void run_solicit(struct run_environment *env, char const *if_name)
 				.icmp6_code	= 0,
 			},
 		},
-		.ll_addr	= { 1, 6 },
+		.ll_addr	= { 1, 1 },
 	};
 
 	if (env->verbosity >= 2)
