@@ -11,6 +11,10 @@ E.g. 'ip link up' waits until the physical link is up which can take
 several seconds.  Or 'ip link add' puts IPv6 addresses into tentiative
 state.
 
+* Requirements
+
+- recent linux kernel
+
 * Examples
 
 - wait until physical link on both =eth0= and =eth1= is up
