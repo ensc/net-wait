@@ -845,6 +845,8 @@ static int monitor_nl(struct run_environment *env)
 
 			pending_req = rc > 0;
 		} else if (fds[1].revents & POLLIN) {
+			fprintf(stderr,
+				"timeout; addresses/links might not be up yet\n");
 			res = EX_NOINPUT;
 			break;
 		}
