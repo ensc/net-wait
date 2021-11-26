@@ -144,6 +144,8 @@ struct run_environment {
 
 	/* safe mode; invalidate cached if_idx values on DELLINK */
 	bool			handle_del_link;
+
+	uint64_t		now;
 };
 
 static void show_help(void)
@@ -165,6 +167,34 @@ static void xclose(int fd)
 {
 	if (fd != -1)
 		close(fd);
+}
+
+static uint64_t get_now(void)
+{
+	/* program is single threaded; no need for locking... */
+	static time_t		REL_TV_SEC = -1;
+
+	struct timespec		ts;
+	uint64_t		res;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+
+	/* avoid theoretically possible overflows by making tv_sec relative to
+	 * program start time */
+	if (unlikely(REL_TV_SEC == -1))
+		REL_TV_SEC = ts.tv_sec;
+
+	assert(ts.tv_sec >= 0);
+
+	res  = (ts.tv_sec - REL_TV_SEC);
+	res *= 1000000000ull;
+	res += ts.tv_nsec;
+
+	/* '0' is magic */
+	if (unlikely(res == 0))
+		res = 1;
+
+	return res;
 }
 
 static struct device *devices_find(struct device *devices, char const *name)
@@ -884,6 +914,8 @@ static int monitor_nl(struct run_environment *env)
 
 		rc = poll(fds, env->fd_tm == -1 ? 1 : 2, -1);
 
+		env->now = get_now();
+
 		if (fds[0].revents & POLLIN) {
 			rc = handle_nl_in(env);
 			if (rc < 0) {
@@ -1121,6 +1153,7 @@ static int run_wait_addr(size_t argc, char *argv[])
 		.fd_tm			= -1,
 		.pending_solicit	= DECLARE_LIST(&env.pending_solicit),
 		.pending_exec		= DECLARE_LIST(&env.pending_exec),
+		.now			= get_now(),
 	};
 
 	struct device	*devices;
