@@ -57,6 +57,7 @@ static struct option const CMDLINE_OPTIONS_ADDR[] = {
 	{ "exec",	required_argument,	0, CMD_EXEC },
 	{ "only-ip4",	no_argument,		0, CMD_ONLY_IP4 },
 	{ "only-ip6",	no_argument,		0, CMD_ONLY_IP6 },
+	{ "solicit",	no_argument,		0, CMD_SOLICIT },
 	{ "timeout",	required_argument,	0, CMD_TIMEOUT },
 	{ }
 };
@@ -119,6 +120,7 @@ struct op_node {
 			struct device	*dev;
 			bool		ip4;
 			bool		ip6;
+			bool		run_solicit;
 		}	addr;
 	};
 };
@@ -377,6 +379,36 @@ static void tree_remove_ifidx(struct op_node *node)
 	}
 }
 
+/* check whether solicitation messages shall be send and schedule them */
+static void tree_check_solicit(struct op_node *node,
+			       struct run_environment *env)
+{
+	/* we are in the middle of the information gathering phase; let it
+	 * calm down before running solicit */
+	if (env->do_req_addr4 || env->do_req_addr6 || env->do_req_link)
+		return;
+
+	switch (node->type) {
+	case OP_TYPE_AND:
+	case OP_TYPE_OR:
+		tree_check_solicit(node->and_or.a, env);
+		tree_check_solicit(node->and_or.b, env);
+		break;
+	case OP_TYPE_NOT:
+		tree_check_solicit(node->and_or.a, env);
+		break;
+
+	case OP_TYPE_LINK:
+		break;
+
+	case OP_TYPE_ADDR:
+		if (node->addr.run_solicit && node->addr.dev->if_idx != -1)
+			device_schedule_solicit(node->addr.dev, env, false);
+
+		break;
+	}
+}
+
 static void tree_analyze_needs(struct op_node *node,
 			       struct run_environment *env)
 {
@@ -554,6 +586,7 @@ static void tree_addr_up(struct op_node *node, struct run_environment *env,
 			printf("ADDING ADDR on %s\n", dev->name);
 
 		node->result = OP_RESULT_TRUE;
+		node->addr.run_solicit = false;
 
 		if (env->exec_prog)
 			list_add_tail(&dev->head_exec, &env->pending_exec);
@@ -958,6 +991,8 @@ static int monitor_nl(struct run_environment *env)
 			break;
 		}
 
+		tree_check_solicit(env->root, env);
+
 		if (env->verbosity >= 5)
 			printf("expect_done=%d, solicit=%d, exec=%d, res=%d\n",
 			       env->expect_done,
@@ -1164,6 +1199,7 @@ static int run_wait_addr(size_t argc, char *argv[])
 	bool		is_any = false;
 	bool		only_ip4 = false;
 	bool		only_ip6 = false;
+	bool		do_solicit = false;
 
 	struct run_environment	env = {
 		.exec_prog		= NULL,
@@ -1213,6 +1249,10 @@ static int run_wait_addr(size_t argc, char *argv[])
 
 		case CMD_ONLY_IP6:
 			only_ip6 = true;
+			break;
+
+		case CMD_SOLICIT:
+			do_solicit = true;
 			break;
 
 		case CMD_TIMEOUT:
@@ -1266,6 +1306,7 @@ static int run_wait_addr(size_t argc, char *argv[])
 				.dev		= dev,
 				.ip4		= !only_ip6,
 				.ip6		= !only_ip4,
+				.run_solicit	= do_solicit,
 			},
 		};
 	}
