@@ -73,6 +73,25 @@ enum op_result {
 	OP_RESULT_FALSE,
 };
 
+enum event_flag {
+	EVENT_FLAG_ADDR_UP,
+	EVENT_FLAG_LINK_UP,
+};
+
+struct device {
+	char const		*name;
+	int			if_idx;
+
+	/* bitmask of 'enum event_flag' bits */
+	unsigned long		events;
+
+	/* bitmask of 'enum event_flag' bits */
+	unsigned long		state;
+
+	struct list_head	head_solicit;
+	struct list_head	head_exec;
+};
+
 struct op_node {
 	enum op_type	type;
 	enum op_result	result;
@@ -88,21 +107,16 @@ struct op_node {
 		}	not;
 
 		struct {
-			char const	*dev_name;
-			int		if_idx;
+			struct device	*dev;
 			bool		run_solicit;
 		}	link;
 
 		struct {
-			char const	*dev_name;
-			int		if_idx;
+			struct device	*dev;
 			bool		ip4;
 			bool		ip6;
 		}	addr;
 	};
-
-	struct list_head	head_solicit;
-	struct list_head	head_exec;
 };
 
 struct run_environment {
@@ -151,6 +165,47 @@ static void xclose(int fd)
 {
 	if (fd != -1)
 		close(fd);
+}
+
+static struct device *devices_find(struct device *devices, char const *name)
+{
+	for (size_t i = 0; devices[i].name != NULL; ++i) {
+		if (streq(devices[i].name, name))
+			return &devices[i];
+	}
+
+	return NULL;
+}
+
+static struct device *devices_register(size_t cnt, char *argv[])
+{
+	/* allocate room for one more element which acts as end-of-array
+	 * marker */
+	struct device	*res = calloc(cnt + 1, sizeof res[0]);
+
+	for (size_t i = 0; i < cnt; ++i) {
+		char const	*name = argv[i];
+
+		for (size_t j = 0;; ++j) {
+			/* calloc() above initialized 'name' of every array
+			 * member to NULL */
+			if (res[j].name == NULL) {
+				res[j] = (struct device) {
+					.name		= name,
+					.if_idx		= -1,
+				};
+				break;
+			}
+
+			/* device already registered */
+			if (streq(res[j].name, name))
+				break;
+		}
+	}
+
+	/* TODO: shrink 'res'? */
+
+	return res;
 }
 
 static void run_solicit(struct run_environment *env, char const *if_name)
@@ -264,11 +319,11 @@ static void tree_remove_ifidx(struct op_node *node)
 		break;
 
 	case OP_TYPE_LINK:
-		node->link.if_idx = -1;
+		node->link.dev->if_idx = -1;
 		break;
 
 	case OP_TYPE_ADDR:
-		node->addr.if_idx = -1;
+		node->addr.dev->if_idx = -1;
 		break;
 	}
 }
@@ -347,13 +402,13 @@ static bool is_netdev(struct op_node *node, unsigned int if_idx)
 
 	switch (node->type) {
 	case OP_TYPE_LINK:
-		n_dev = node->link.dev_name;
-		n_idx = &node->link.if_idx;
+		n_dev = node->link.dev->name;
+		n_idx = &node->link.dev->if_idx;
 		break;
 
 	case OP_TYPE_ADDR:
-		n_dev = node->addr.dev_name;
-		n_idx = &node->addr.if_idx;
+		n_dev = node->addr.dev->name;
+		n_idx = &node->addr.dev->if_idx;
 		break;
 
 	default:
@@ -378,7 +433,8 @@ static bool is_netdev(struct op_node *node, unsigned int if_idx)
 static void tree_addr_up(struct op_node *node, struct run_environment *env,
 			 struct ifaddrmsg const *msg)
 {
-	int	if_idx = msg->ifa_index;
+	int		if_idx = msg->ifa_index;
+	struct device	*dev;
 
 	/* result is known; type of subtree does not matter */
 	if (node->result != OP_RESULT_UNDECIDED)
@@ -443,13 +499,15 @@ static void tree_addr_up(struct op_node *node, struct run_environment *env,
 		if (!check_addr(msg, node))
 			break;
 
+		dev = node->addr.dev;
+
 		if (env->verbosity >= 2)
-			printf("ADDING ADDR on %s\n", node->addr.dev_name);
+			printf("ADDING ADDR on %s\n", dev->name);
 
 		node->result = OP_RESULT_TRUE;
 
 		if (env->exec_prog)
-			list_add_tail(&node->head_exec, &env->pending_exec);
+			list_add_tail(&dev->head_exec, &env->pending_exec);
 
 		break;
 
@@ -457,9 +515,11 @@ static void tree_addr_up(struct op_node *node, struct run_environment *env,
 		if (!is_netdev(node, if_idx))
 			break;
 
+		dev = node->link.dev;
+
 		if (env->verbosity >= 4)
-			printf("  LINK DETAILS: scope=%d, flags=%x\n",
-			       msg->ifa_scope, msg->ifa_flags);
+			printf("  LINK[%s] DETAILS: scope=%d, flags=%x\n",
+			       dev->name, msg->ifa_scope, msg->ifa_flags);
 
 		if (!node->link.run_solicit ||
 		    msg->ifa_scope != RT_SCOPE_LINK ||
@@ -470,10 +530,10 @@ static void tree_addr_up(struct op_node *node, struct run_environment *env,
 			break;
 
 		if (env->verbosity >= 2)
-			printf("ADDING LINK %s\n", node->link.dev_name);
+			printf("ADDING LINK %s\n", dev->name);
 
 		node->result = OP_RESULT_TRUE;
-		list_add_tail(&node->head_solicit, &env->pending_solicit);
+		list_add_tail(&dev->head_solicit, &env->pending_solicit);
 
 		break;
 	}
@@ -482,7 +542,8 @@ static void tree_addr_up(struct op_node *node, struct run_environment *env,
 static void tree_link_up(struct op_node *node, struct run_environment *env,
 			 struct ifinfomsg const *msg)
 {
-	int	if_idx = msg->ifi_index;
+	int		if_idx = msg->ifi_index;
+	struct device	*dev;
 
 	/* result is known; type of subtree does not matter */
 	if (node->result != OP_RESULT_UNDECIDED)
@@ -553,13 +614,15 @@ static void tree_link_up(struct op_node *node, struct run_environment *env,
 		if (node->link.run_solicit)
 			break;
 
+		dev = node->link.dev;
+
 		if (env->verbosity >= 2)
-			printf("ADDING LINK %s\n", node->link.dev_name);
+			printf("ADDING LINK %s\n", dev->name);
 
 		node->result = OP_RESULT_TRUE;
 
 		if (env->exec_prog)
-			list_add_tail(&node->head_exec, &env->pending_exec);
+			list_add_tail(&dev->head_exec, &env->pending_exec);
 
 		break;
 	}
@@ -786,20 +849,13 @@ static int handle_nl_in(struct run_environment *env)
 static void run_all_solicit(struct run_environment *env)
 {
 	while (!list_empty(&env->pending_solicit)) {
-		struct op_node	*node =
+		struct device	*dev =
 			list_first_entry(&env->pending_solicit,
-					 struct op_node, head_solicit);
+					 struct device, head_solicit);
 
-		list_del(&node->head_solicit);
+		list_del(&dev->head_solicit);
 
-		switch (node->type) {
-		case OP_TYPE_LINK:
-			run_solicit(env, node->link.dev_name);
-			break;
-
-		default:
-			break;
-		}
+		run_solicit(env, dev->name);
 	}
 }
 
@@ -947,6 +1003,7 @@ static int run_wait_link(size_t argc, char *argv[])
 		.pending_exec		= DECLARE_LIST(&env.pending_exec),
 	};
 
+	struct device	*devices;
 	struct op_node	*nodes;
 	int		rc;
 
@@ -1006,21 +1063,31 @@ static int run_wait_link(size_t argc, char *argv[])
 		return EX_USAGE;
 	}
 
+	devices = devices_register(argc - optind, argv + optind);
+	if (!devices) {
+		perror("failed to register devices");
+		return EX_OSERR;
+	}
+
 	/* allocate memory for nodes (nodes with devices) and the and/or
 	 * operators between them */
 	nodes = calloc((argc - optind) + (argc - optind - 1), sizeof nodes[0]);
 	if (!nodes) {
+		free(devices);
 		perror("calloc()");
 		return EX_OSERR;
 	}
 
 	for (size_t i = optind; i < argc; ++i) {
+		struct device	*dev = devices_find(devices, argv[i]);
+
+		assert(dev);
+
 		nodes[i - optind] = (struct op_node) {
 			.type		= OP_TYPE_LINK,
 			.result		= OP_RESULT_UNDECIDED,
 			.link		= {
-				.dev_name	= argv[i],
-				.if_idx		= -1,
+				.dev		= dev,
 				.run_solicit	= do_solicit,
 			},
 		};
@@ -1035,6 +1102,7 @@ static int run_wait_link(size_t argc, char *argv[])
 	xclose(env.fd_nl);
 	xclose(env.fd_tm);
 	free(nodes);
+	free(devices);
 
 	return rc;
 }
@@ -1055,6 +1123,7 @@ static int run_wait_addr(size_t argc, char *argv[])
 		.pending_exec		= DECLARE_LIST(&env.pending_exec),
 	};
 
+	struct device	*devices;
 	struct op_node	*nodes;
 	int		rc;
 
@@ -1118,21 +1187,31 @@ static int run_wait_addr(size_t argc, char *argv[])
 		return EX_USAGE;
 	}
 
+	devices = devices_register(argc - optind, argv + optind);
+	if (!devices) {
+		perror("failed to register devices");
+		return EX_OSERR;
+	}
+
 	/* allocate memory for nodes (nodes with devices) and the and/or
 	 * operators between them */
 	nodes = calloc((argc - optind) + (argc - optind - 1), sizeof nodes[0]);
 	if (!nodes) {
+		free(devices);
 		perror("calloc()");
 		return EX_OSERR;
 	}
 
 	for (size_t i = optind; i < argc; ++i) {
+		struct device	*dev = devices_find(devices, argv[i]);
+
+		assert(dev);
+
 		nodes[i - optind] = (struct op_node) {
 			.type		= OP_TYPE_ADDR,
 			.result		= OP_RESULT_UNDECIDED,
 			.addr		= {
-				.dev_name	= argv[i],
-				.if_idx		= -1,
+				.dev		= dev,
 				.ip4		= !only_ip6,
 				.ip6		= !only_ip4,
 			},
@@ -1148,6 +1227,7 @@ static int run_wait_addr(size_t argc, char *argv[])
 	xclose(env.fd_nl);
 	xclose(env.fd_tm);
 	free(nodes);
+	free(devices);
 
 	return rc;
 }
