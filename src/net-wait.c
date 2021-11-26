@@ -27,6 +27,8 @@
 #  define IFF_LOWER_UP			1<<16
 #endif
 
+#define SOLICIT_DELAY_NS	((uint64_t)(1 * 1000 * 1000 * 1000))
+
 enum {
 	CMD_HELP = 0x8000,
 	CMD_ALL,
@@ -87,6 +89,8 @@ struct device {
 
 	/* bitmask of 'enum event_flag' bits */
 	unsigned long		state;
+
+	uint64_t		next_solicit_ns;
 
 	struct list_head	head_solicit;
 	struct list_head	head_exec;
@@ -195,6 +199,21 @@ static uint64_t get_now(void)
 		res = 1;
 
 	return res;
+}
+
+static void device_schedule_solicit(struct device *dev,
+				    struct run_environment *env,
+				    bool force)
+{
+	if (!force && dev->next_solicit_ns != 0 && dev->next_solicit_ns > env->now)
+		return;
+
+	list_add_tail(&dev->head_solicit, &env->pending_solicit);
+	dev->next_solicit_ns = env->now + SOLICIT_DELAY_NS;
+
+	/* '0' is magic */
+	if (unlikely(dev->next_solicit_ns == 0))
+		dev->next_solicit_ns = 1;
 }
 
 static struct device *devices_find(struct device *devices, char const *name)
@@ -563,7 +582,7 @@ static void tree_addr_up(struct op_node *node, struct run_environment *env,
 			printf("ADDING LINK %s\n", dev->name);
 
 		node->result = OP_RESULT_TRUE;
-		list_add_tail(&dev->head_solicit, &env->pending_solicit);
+		device_schedule_solicit(dev, env, true);
 
 		break;
 	}
